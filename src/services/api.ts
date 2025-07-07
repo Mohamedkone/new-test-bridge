@@ -1,9 +1,28 @@
-import axios, { type AxiosInstance, type AxiosRequestConfig, type AxiosResponse } from 'axios';
+// src/services/api.ts
+import axios, { type AxiosInstance, type AxiosResponse, AxiosError } from 'axios';
 import { ENV, STORAGE_KEYS } from '../utils/constants';
-import { type ApiResponse, type ApiError } from '../types/api.types';
+
+export interface ApiResponse<T = any> {
+  success: boolean;
+  data?: T;
+  error?: {
+    code: string;
+    message: string;
+    details?: any;
+  };
+  meta?: {
+    pagination?: {
+      page: number;
+      limit: number;
+      total: number;
+      pages: number;
+    };
+  };
+}
 
 class ApiService {
   private axiosInstance: AxiosInstance;
+  public authToken: string | null = null;
 
   constructor() {
     this.axiosInstance = axios.create({
@@ -15,15 +34,15 @@ class ApiService {
     });
 
     this.setupInterceptors();
+    this.loadAuthToken();
   }
 
-  private setupInterceptors() {
-    // Request interceptor to add auth token
+  private setupInterceptors(): void {
+    // Request interceptor
     this.axiosInstance.interceptors.request.use(
       (config) => {
-        const token = localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
-        if (token) {
-          config.headers.Authorization = `Bearer ${token}`;
+        if (this.authToken) {
+          config.headers.Authorization = `Bearer ${this.authToken}`;
         }
         return config;
       },
@@ -32,16 +51,15 @@ class ApiService {
       }
     );
 
-    // Response interceptor to handle errors
+    // Response interceptor
     this.axiosInstance.interceptors.response.use(
       (response: AxiosResponse) => {
         return response;
       },
-      (error) => {
+      (error: AxiosError) => {
         if (error.response?.status === 401) {
           // Token expired or invalid
-          localStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN);
-          localStorage.removeItem(STORAGE_KEYS.USER_DATA);
+          this.removeAuthToken();
           window.location.href = '/login';
         }
         return Promise.reject(error);
@@ -49,135 +67,153 @@ class ApiService {
     );
   }
 
-  // Generic GET request
-  async get<T = any>(url: string, config?: AxiosRequestConfig): Promise<ApiResponse<T>> {
-    try {
-      const response = await this.axiosInstance.get<ApiResponse<T>>(url, config);
-      return response.data;
-    } catch (error: any) {
-      throw this.handleError(error);
+  private loadAuthToken(): void {
+    const token = localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
+    if (token) {
+      this.authToken = token;
     }
   }
 
-  // Generic POST request
-  async post<T = any>(url: string, data?: any, config?: AxiosRequestConfig): Promise<ApiResponse<T>> {
-    try {
-      const response = await this.axiosInstance.post<ApiResponse<T>>(url, data, config);
-      return response.data;
-    } catch (error: any) {
-      throw this.handleError(error);
-    }
-  }
-
-  // Generic PUT request
-  async put<T = any>(url: string, data?: any, config?: AxiosRequestConfig): Promise<ApiResponse<T>> {
-    try {
-      const response = await this.axiosInstance.put<ApiResponse<T>>(url, data, config);
-      return response.data;
-    } catch (error: any) {
-      throw this.handleError(error);
-    }
-  }
-
-  // Generic PATCH request
-  async patch<T = any>(url: string, data?: any, config?: AxiosRequestConfig): Promise<ApiResponse<T>> {
-    try {
-      const response = await this.axiosInstance.patch<ApiResponse<T>>(url, data, config);
-      return response.data;
-    } catch (error: any) {
-      throw this.handleError(error);
-    }
-  }
-
-  // Generic DELETE request
-  async delete<T = any>(url: string, config?: AxiosRequestConfig): Promise<ApiResponse<T>> {
-    try {
-      const response = await this.axiosInstance.delete<ApiResponse<T>>(url, config);
-      return response.data;
-    } catch (error: any) {
-      throw this.handleError(error);
-    }
-  }
-
-  // File upload with progress
-  async uploadFile<T = any>(
-    url: string,
-    file: File,
-    onUploadProgress?: (progressEvent: any) => void,
-    config?: AxiosRequestConfig
-  ): Promise<ApiResponse<T>> {
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-
-      const response = await this.axiosInstance.post<ApiResponse<T>>(url, formData, {
-        ...config,
-        headers: {
-          'Content-Type': 'multipart/form-data',
-          ...config?.headers,
-        },
-        onUploadProgress,
-      });
-
-      return response.data;
-    } catch (error: any) {
-      throw this.handleError(error);
-    }
-  }
-
-  // Set auth token
-  setAuthToken(token: string) {
+  public setAuthToken(token: string): void {
+    this.authToken = token;
     localStorage.setItem(STORAGE_KEYS.AUTH_TOKEN, token);
   }
 
-  // Remove auth token
-  removeAuthToken() {
+  public getAuthToken(): string | null {
+    return this.authToken || localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
+  }
+
+  public removeAuthToken(): void {
+    this.authToken = null;
     localStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN);
-    localStorage.removeItem(STORAGE_KEYS.USER_DATA);
   }
 
-  // Get current auth token
-  getAuthToken(): string | null {
-    return localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
-  }
-
-  // Handle API errors
-  private handleError(error: any): ApiError {
-    if (error.response?.data) {
-      // Server responded with error data
-      return error.response.data;
-    } else if (error.request) {
-      // Network error
-      return {
-        success: false,
-        error: {
-          code: 'NETWORK_ERROR',
-          message: 'Network error. Please check your connection and try again.',
-        },
-      };
-    } else {
-      // Other error
-      return {
-        success: false,
-        error: {
-          code: 'UNKNOWN_ERROR',
-          message: error.message || 'An unexpected error occurred.',
-        },
-      };
+  private async handleRequest<T>(
+    request: () => Promise<AxiosResponse<any>>
+  ): Promise<ApiResponse<T>> {
+    try {
+      const response = await request();
+      
+      // Handle different response formats
+      if (response.data.success !== undefined) {
+        // Backend returns { success: boolean, data: any, error?: any }
+        return response.data;
+      } else {
+        // Backend returns data directly
+        return {
+          success: true,
+          data: response.data,
+        };
+      }
+    } catch (error: any) {
+      console.error('API Request failed:', error);
+      
+      if (error.response?.data) {
+        // Server returned an error response
+        return {
+          success: false,
+          error: {
+            code: error.response.data.error?.code || 'API_ERROR',
+            message: error.response.data.error?.message || error.response.data.message || 'An error occurred',
+            details: error.response.data.error?.details || error.response.data,
+          },
+        };
+      } else if (error.request) {
+        // Network error
+        return {
+          success: false,
+          error: {
+            code: 'NETWORK_ERROR',
+            message: 'Unable to connect to the server. Please check your internet connection.',
+          },
+        };
+      } else {
+        // Other error
+        return {
+          success: false,
+          error: {
+            code: 'UNKNOWN_ERROR',
+            message: error.message || 'An unexpected error occurred',
+          },
+        };
+      }
     }
   }
 
-  // Health check
-  async healthCheck(): Promise<{ status: string; version?: string }> {
+  // GET request
+  public async get<T>(url: string, params?: any): Promise<ApiResponse<T>> {
+    return this.handleRequest(() =>
+      this.axiosInstance.get(url, { params })
+    );
+  }
+
+  // POST request
+  public async post<T>(url: string, data?: any): Promise<ApiResponse<T>> {
+    return this.handleRequest(() =>
+      this.axiosInstance.post(url, data)
+    );
+  }
+
+  // PUT request
+  public async put<T>(url: string, data?: any): Promise<ApiResponse<T>> {
+    return this.handleRequest(() =>
+      this.axiosInstance.put(url, data)
+    );
+  }
+
+  // PATCH request
+  public async patch<T>(url: string, data?: any): Promise<ApiResponse<T>> {
+    return this.handleRequest(() =>
+      this.axiosInstance.patch(url, data)
+    );
+  }
+
+  // DELETE request
+  public async delete<T>(url: string, data?: any): Promise<ApiResponse<T>> {
+    return this.handleRequest(() =>
+      this.axiosInstance.delete(url, { data })
+    );
+  }
+
+  // Upload file with progress
+  public async uploadFile<T>(
+    url: string,
+    formData: FormData,
+    onProgress?: (progressEvent: any) => void
+  ): Promise<ApiResponse<T>> {
+    return this.handleRequest(() =>
+      this.axiosInstance.post(url, formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+        onUploadProgress: onProgress,
+      })
+    );
+  }
+
+  // Download file
+  public async downloadFile(url: string, filename?: string): Promise<void> {
     try {
-      const response = await this.axiosInstance.get('/health');
-      return response.data;
+      const response = await this.axiosInstance.get(url, {
+        responseType: 'blob',
+      });
+
+      const blob = new Blob([response.data]);
+      const downloadUrl = window.URL.createObjectURL(blob);
+      
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = filename || 'download';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      window.URL.revokeObjectURL(downloadUrl);
     } catch (error) {
-      throw new Error('API is not available');
+      console.error('Download failed:', error);
+      throw error;
     }
   }
 }
 
-// Export singleton instance
 export const apiService = new ApiService();
-export default apiService;

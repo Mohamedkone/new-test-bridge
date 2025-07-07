@@ -1,5 +1,5 @@
-// @ts-nocheck
-import { useContext, useEffect, useState, type SetStateAction } from "react";
+// src/pages/account/Storage.tsx
+import { useEffect, useState } from "react";
 import {
     Box,
     Typography,
@@ -7,508 +7,533 @@ import {
     CardContent,
     Button,
     TextField,
-    Divider,
     Switch,
     FormControlLabel,
+    Alert,
+    CircularProgress,
 } from "@mui/material";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
-import axios from "axios";
 import { Cancel, Edit, Save } from "@mui/icons-material";
 import { useNavigate } from "react-router-dom";
 import { platforms } from "./plateform";
 import { useAuth } from "../../contexts/AuthContext";
+import { storageService, type StorageAccount, type CreateStorageAccountData } from "../../services/storage.service";
+import { oauthService } from "../../services/oauth.service";
 
+interface StorageProps {
+    setSelectedTab: (tab: number) => void;
+}
 
-    const Storage = ({setSelectedTab}:any) => {
-        const [selectedPlatform, setSelectedPlatform] = useState(null);
-        const [existingStorage, setExistingStorage] = useState(null);
-        const [filteredList, setFilteredList] = useState(null);
-        const api = ""
-        const { user } = useAuth()
-        const [formData, setFormData] = useState({});
+const Storage = ({ setSelectedTab }: StorageProps) => {
+    const [selectedPlatform, setSelectedPlatform] = useState<string | null>(null);
+    const [existingStorage, setExistingStorage] = useState<StorageAccount[]>([]);
+    const [filteredList, setFilteredList] = useState<StorageAccount[]>([]);
+    const [formData, setFormData] = useState<Record<string, string>>({});
     const [useSignedUrl, setUseSignedUrl] = useState(false);
-    const [expanded, setExpanded] = useState(null);
-    const [ editing, setEditing ] = useState(false)
-    const [ removeList, setRemoveList ] = useState([])
-    const [ removeApiList, setRemoveApiList ] = useState([])
-    const [ds, setDs] = useState(null)
-    const navigate = useNavigate()
+    const [expanded, setExpanded] = useState<StorageAccount | null>(null);
+    const [editing, setEditing] = useState(false);
+    const [removeList, setRemoveList] = useState<string[]>([]);
+    const [removeApiList, setRemoveApiList] = useState<string[]>([]);
+    const [ds, setDs] = useState<any>(null);
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const [success, setSuccess] = useState<string | null>(null);
 
-    const connectGoogleDrive = () => {
-        const clientId = "304417414909-h29cj5ubvjppk6j2ftdj67otsp66rhqk.apps.googleusercontent.com";
-        const redirectUri = `http://localhost:3000/callbackss`;
-        const scope = "https://www.googleapis.com/auth/drive.file";
-        const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${redirectUri}&response_type=code&scope=${scope}&access_type=offline&prompt=consent`;
-        window.location.href = authUrl;
-    };
-    const connectDropbox = () => {
-        const clientId = "hvrwt9jed00sv3v";
-        const redirectUri = `http://localhost:3000/callbacksdrop`;
-        const authUrl = `https://www.dropbox.com/oauth2/authorize?client_id=${clientId}&redirect_uri=${redirectUri}&response_type=code&token_access_type=offline
-`;
-        window.location.href = authUrl;
-    };
-    
-    useEffect(()=>{
-        const fetch = async() =>{
-            const main: { id: any; alias: any; platform: any; }[] = []
-            await axios.get(`${api}/api-storages/${user?.id}`).then((res)=>{
-                for(let x of res.data){
-                    const storage = {
-                        id: x.id,
-                        alias: `${x.platform} storage`,
-                        platform: x.platform
-                    }
-                    main.push(storage)
-                    console.log(storage)
-                }
-            })
-            await axios.get(`${api}/mystorages/${user?.id}`).then((res)=>{
+    const { user } = useAuth();
+    const navigate = useNavigate();
 
-                for(let x of res.data){
-                    const dbStorage ={
-                        id: x.id,
-                        alias: x.alias,
-                        platform: x.platform,
-                    }
-                    main.push(dbStorage)
-                }
-            })
-            axios.get(`http://localhost:3001/ds/${user.id}`).then((res)=>{
-                setDs(res.data)
-                console.log(res.data)
-            })
-            setExistingStorage([...main])
-            setFilteredList([...main])
+    // Load storage accounts on component mount
+    useEffect(() => {
+        if (user?.id) {
+            loadStorageAccounts();
+            loadVaultStorage();
         }
-        // if(user?.id)
-        // fetch()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    },[user])
+    }, [user?.id]);
 
-    useEffect(()=>{
-        FilterList()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    },[removeList])
+    // Update filtered list when removeList changes
+    useEffect(() => {
+        filterList();
+    }, [removeList, existingStorage]);
 
-    const handleSelectPlatform = (platformKey: any) => {
+    const loadStorageAccounts = async () => {
+        if (!user?.id) return;
+
+        try {
+            setLoading(true);
+            const accounts = await storageService.getStorageAccounts(user.id);
+            setExistingStorage(accounts);
+            setFilteredList(accounts);
+        } catch (error) {
+            setError('Failed to load storage accounts');
+            console.error('Failed to load storage accounts:', error);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const loadVaultStorage = async () => {
+        if (!user?.id) return;
+
+        try {
+            const vaultData = await storageService.getVaultStorage(user.id);
+            setDs(vaultData);
+        } catch (error) {
+            console.error('Failed to load vault storage:', error);
+        }
+    };
+
+    const handleSelectPlatform = (platformKey: string) => {
         setSelectedPlatform(platformKey);
         setFormData({});
-        setUseSignedUrl(false); // Reset signed URL toggle
+        setUseSignedUrl(false);
+        setError(null);
     };
 
     const handleInputChange = (key: string, value: string) => {
         setFormData((prevState) => ({
-        ...prevState,
-        [key]: value,
+            ...prevState,
+            [key]: value,
         }));
     };
 
-    const handleSaveStorage = () => {
-        const newStorage = {
-            id: existingStorage.length + 1,
-            alias: formData.alias || "Unnamed Storage",
-            platform: platforms[selectedPlatform].name,
-            details: formData,
-        };
-        sendToDb()
-        setExistingStorage((prev) => [...prev, newStorage]);
-        setSelectedPlatform(null);
+    const handleSaveStorage = async () => {
+        if (!selectedPlatform || !user?.id) return;
+
+        try {
+            setLoading(true);
+            setError(null);
+
+            const storageData: CreateStorageAccountData = {
+                name: formData.alias || `${platforms[selectedPlatform].name} Storage`,
+                userId: user.id,
+                storageType: platforms[selectedPlatform].name.toLowerCase().replace(/\s+/g, '_'),
+                credentials: {
+                    endpoint: formData["Endpoint URL"],
+                    accessKeyId: formData["Access Key ID"],
+                    secretAccessKey: formData["Secret Access Key"],
+                    bucketName: formData["Bucket Name"],
+                    region: formData["Region"],
+                }
+            };
+
+            await storageService.createStorageAccount(storageData);
+            setSuccess('Storage account created successfully');
+            
+            // Reload storage accounts
+            await loadStorageAccounts();
+            
+            // Reset form
+            setSelectedPlatform(null);
+            setFormData({});
+        } catch (error) {
+            setError('Failed to create storage account');
+            console.error('Failed to create storage account:', error);
+        } finally {
+            setLoading(false);
+        }
     };
 
-    const sendToDb = () =>{
-        // console.log(formData["Endpoint URL"],
-        //     formData["Access Key ID"],
-        //     formData["Secret Access Key"],
-        //     formData["Bucket Name"],
-        //     formData["Region"],)
-        axios.post(`${api}/storages`,{
-            id: toString(existingStorage.length + 1),
-            alias: formData.alias,
-            system: platforms[selectedPlatform].name,
-            ownerId: user.id,
-            access: {
-                endpoint: formData["Endpoint URL"],
-                accessKeyId: formData["Access Key ID"],
-                secretAccessKey: formData["Secret Access Key"],
-                bucketName: formData["Bucket Name"],
-                region: formData["Region"],
-            }
-        }).then(()=>
-            window.location.reload()
-        )
-    }
-
     const handleEditing = () => {
-        setEditing(!editing)
-    }
+        setEditing(!editing);
+        if (editing) {
+            // Cancel editing - reset remove lists
+            setRemoveList([]);
+            setRemoveApiList([]);
+        }
+    };
 
-    const handleCancel = () =>{
-        setRemoveList(()=>[])
-        setRemoveApiList(()=>[])
-        setEditing(false)
-    }
-    
-    const handleSave = async() =>{
-        try{
-                if(removeList){
-                    await axios.delete(`${api}/storages`,{
-                        data:removeList
-                    })
-                }
-                if(removeApiList){
-                    for(let x of removeApiList){
-                        await axios.delete(`${api}/api-storages/${x}`)
-                    }
-                }
-                window.location.reload()
-            }catch{
+    const handleCancel = () => {
+        setRemoveList([]);
+        setRemoveApiList([]);
+        setEditing(false);
+    };
 
+    const handleSave = async () => {
+        try {
+            setLoading(true);
+            setError(null);
+
+            // Delete selected storage accounts
+            const allToDelete = [...removeList, ...removeApiList];
+            if (allToDelete.length > 0) {
+                await storageService.deleteMultipleStorageAccounts(allToDelete);
+                setSuccess('Storage accounts deleted successfully');
             }
-    }
 
-    const ToBeRemove = (newId) => {
-        setRemoveList((prev)=>[...prev, newId])
-    }
-    const ApiToBeRemove = (newId) => {
-        setRemoveApiList((prev)=>[...prev, newId])
-    }
-    const FilterList = () => {
-        setFilteredList(existingStorage?.filter((x)=> !removeList.includes(x.id)))
-    }
+            // Reload storage accounts
+            await loadStorageAccounts();
+            
+            // Reset state
+            setRemoveList([]);
+            setRemoveApiList([]);
+            setEditing(false);
+        } catch (error) {
+            setError('Failed to delete storage accounts');
+            console.error('Failed to delete storage accounts:', error);
+        } finally {
+            setLoading(false);
+        }
+    };
 
-    const handleMembership = () =>{
-        navigate('/account?tab=4')
-        setSelectedTab(4)
-    }
+    const toBeRemove = (newId: string) => {
+        setRemoveList((prev) => [...prev, newId]);
+    };
 
-    const oAuthChoice = (name) =>{
-        if (name === 'Dropbox') connectDropbox()
-        else connectGoogleDrive()
-    }
+    const apiToBeRemove = (newId: string) => {
+        setRemoveApiList((prev) => [...prev, newId]);
+    };
 
-    const formatBytes = (bytes) => {
+    const filterList = () => {
+        const allRemoved = [...removeList, ...removeApiList];
+        setFilteredList(existingStorage.filter((x) => !allRemoved.includes(x.id)));
+    };
+
+    const handleMembership = () => {
+        navigate('/account?tab=4');
+        setSelectedTab(4);
+    };
+
+    const connectGoogleDrive = async () => {
+        if (!user?.id) return;
+
+        try {
+            setLoading(true);
+            setError(null);
+            
+            const response = await oauthService.authorizeGoogleDrive(user.id);
+            window.location.href = response.authUrl;
+        } catch (error) {
+            setError('Failed to start Google Drive connection');
+            console.error('Failed to start Google Drive OAuth:', error);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const connectDropbox = async () => {
+        if (!user?.id) return;
+
+        try {
+            setLoading(true);
+            setError(null);
+            
+            const response = await oauthService.authorizeDropbox(user.id);
+            window.location.href = response.authUrl;
+        } catch (error) {
+            setError('Failed to start Dropbox connection');
+            console.error('Failed to start Dropbox OAuth:', error);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const oAuthChoice = (name: string) => {
+        if (name === 'Dropbox') {
+            connectDropbox();
+        } else if (name === 'Google Drive') {
+            connectGoogleDrive();
+        }
+    };
+
+    const formatBytes = (bytes: number) => {
         if (bytes < 0) return 'Invalid value';
         if (bytes === 0) return '0 Bytes';
-      
-        const units = ['Bytes', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB'];
-        const base = 1000; // Use 1024 for binary (IEC) conversion
-      
-        const i = Math.floor(Math.log(bytes) / Math.log(base));
-      
-        const value = (bytes / Math.pow(base, i)).toFixed(2); // 2 decimal places
-      
-        return `${parseFloat(value)} ${units[i]}`;
-      }
 
-    const handleOpenStorageCard = (storage) => {
-    // Toggle the expanded state: if the card is already expanded, collapse it (set expanded to null).
-    // If the card is not expanded, set the expanded state to the current storage ID and platform.
-    console.log(storage)
-    setExpanded((prevExpanded) => 
-        prevExpanded?.id === storage.id ? null : storage
-    );
-};
-console.log(existingStorage)
+        const units = ['Bytes', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB'];
+        const base = 1000;
+
+        const i = Math.floor(Math.log(bytes) / Math.log(base));
+        const value = (bytes / Math.pow(base, i)).toFixed(2);
+
+        return `${parseFloat(value)} ${units[i]}`;
+    };
+
+    const handleOpenStorageCard = (storage: StorageAccount) => {
+        setExpanded((prevExpanded) =>
+            prevExpanded?.id === storage.id ? null : storage
+        );
+    };
+
+    const testStorageConnection = async (storageId: string) => {
+        try {
+            setLoading(true);
+            const result = await storageService.testConnection(storageId);
+            if (result.success) {
+                setSuccess('Storage connection test successful');
+            } else {
+                setError(result.message || 'Storage connection test failed');
+            }
+        } catch (error) {
+            setError('Failed to test storage connection');
+            console.error('Failed to test storage connection:', error);
+        } finally {
+            setLoading(false);
+        }
+    };
 
     return (
         <Box p={4} display={'flex'} flexDirection={'column'} gap={2}>
-        <Typography variant="h3" gutterBottom>
-            Storage Integrations
-        </Typography>
-        <Box
-            display={'flex'}
-            flexDirection={'column'}
-        >
-        <Typography variant="h4" gutterBottom>
-            Vault Storage
-        </Typography>
-        <Box
-            display={'flex'}
-            // flexDirection={'column'}
-            justifyContent={'space-evenly'}
-            alignItems={"center"}
-            sx={{
-                background: "none",
-                boxShadow: "0 1px 5px #ccc",
-                minWidth: "calc(min(300px, 90dvw))",
-                minHeight: "100px"
-            }}
-        >
-            <Box
-                display={'flex'}
-                flexDirection={'column'}
-            >
-                <Typography variant="h5">Storage Type</Typography>
-                <Typography fontWeight={'bold'}>{ds?ds.type:'---'}</Typography>
-
-            </Box>
-            <Box
-                display={'flex'}
-                flexDirection={'column'}
-            >
-                <Typography variant="h5">Capacity</Typography>
-                <Typography fontWeight={'bold'}>{ds? formatBytes(ds.size):'--'}</Typography>
-
-            </Box>
-            <Box
-                display={'flex'}
-                flexDirection={'column'}
-            >
-                <Typography variant="h5">Region</Typography>
-                <Typography fontWeight={'bold'}>US-1</Typography>
-
-            </Box>
-            <Box
-                display={'flex'}
-                flexDirection={'column'}
-            >
-                <Button
-                    variant="contained" 
-                    color="myBlue"
-                    sx={{color:"#fff"}}
-                    onClick={()=>handleMembership()}
-                >
-                    Manage Plan
-                </Button>
-            </Box>
-
-        </Box>
-        </Box>
-        <Box 
-            display={'flex'} 
-            justifyContent={'space-between'}
-        >
-            <Typography variant="h4" mt={3}>
-                Existing Storage
+            <Typography variant="h3" gutterBottom>
+                Storage Integrations
             </Typography>
-            {editing?
+
+            {/* Error and Success Messages */}
+            {error && (
+                <Alert severity="error" onClose={() => setError(null)}>
+                    {error}
+                </Alert>
+            )}
+            {success && (
+                <Alert severity="success" onClose={() => setSuccess(null)}>
+                    {success}
+                </Alert>
+            )}
+
+            {/* Loading Indicator */}
+            {loading && (
+                <Box display="flex" justifyContent="center" my={2}>
+                    <CircularProgress />
+                </Box>
+            )}
+
+            {/* Vault Storage Section */}
+            <Box display={'flex'} flexDirection={'column'}>
+                <Typography variant="h4" gutterBottom>
+                    Vault Storage
+                </Typography>
                 <Box
+                    display={'flex'}
+                    justifyContent={'space-evenly'}
+                    alignItems={"center"}
                     sx={{
-                        display: 'flex',
-                        gap:2,
-                    }}>
-                    <Button 
-                    startIcon={<Cancel />}
-                    variant="contained"
-                    color="error"
-                    onClick={()=>handleCancel()}
-                    >
-                        Cancel
-                    </Button>
-                    <Button 
-                        startIcon={<Save />}
+                        background: "none",
+                        boxShadow: "0 1px 5px #ccc",
+                        minWidth: "calc(min(300px, 90dvw))",
+                        minHeight: "100px"
+                    }}
+                >
+                    <Box display={'flex'} flexDirection={'column'}>
+                        <Typography variant="h5">Storage Type</Typography>
+                        <Typography fontWeight={'bold'}>{ds?.type || '---'}</Typography>
+                    </Box>
+                    <Box display={'flex'} flexDirection={'column'}>
+                        <Typography variant="h5">Capacity</Typography>
+                        <Typography fontWeight={'bold'}>{ds ? formatBytes(ds.size) : '--'}</Typography>
+                    </Box>
+                    <Box display={'flex'} flexDirection={'column'}>
+                        <Typography variant="h5">Region</Typography>
+                        <Typography fontWeight={'bold'}>US-1</Typography>
+                    </Box>
+                    <Box display={'flex'} flexDirection={'column'}>
+                        <Button
+                            variant="contained"
+                            color="primary"
+                            onClick={handleMembership}
+                        >
+                            Manage Plan
+                        </Button>
+                    </Box>
+                </Box>
+            </Box>
+
+            {/* Existing Storage Section */}
+            <Box display={'flex'} justifyContent={'space-between'}>
+                <Typography variant="h4" mt={3}>
+                    Existing Storage
+                </Typography>
+                {editing ? (
+                    <Box sx={{ display: 'flex', gap: 2 }}>
+                        <Button
+                            startIcon={<Cancel />}
+                            variant="contained"
+                            color="error"
+                            onClick={handleCancel}
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            startIcon={<Save />}
+                            variant="contained"
+                            color="primary"
+                            onClick={handleSave}
+                        >
+                            Save
+                        </Button>
+                    </Box>
+                ) : (
+                    <Button
+                        startIcon={<Edit />}
                         variant="contained"
                         color="primary"
-                        onClick={()=>handleSave()}
+                        onClick={handleEditing}
                     >
-                        Save
+                        Edit
                     </Button>
-                </Box>
-                :
-                <Button 
-                    startIcon={<Edit />}
-                    variant="contained"
-                    color="myBlue"
-                    sx={{color:"#fff"}}
-                    onClick={()=>handleEditing()}
-                >
-                    Edit
-                </Button>
-            }
-        </Box>
-        <Box
-            display={"flex"} gap={3} flexWrap={"wrap"}
-        >
-        {filteredList?filteredList?.map((storage) => (
-            <Box key={storage.id} mt={2}>
-            <Card sx={{ 
-                background: "none",
-                boxShadow: "0 1px 5px #ccc",
-                width: "calc(min(300px, 90dvw))",
-                maxWidth:"400px"
-            }}>
-                <CardContent 
-                    onClick={() => handleOpenStorageCard(storage)}
-                    sx={{
-                        cursor:"pointer",
-                        textAlign:"center"
-                    }}
-                >
-                <Typography variant="h4">{storage.alias}</Typography>
-                <Box display={'flex'} justifyContent={'center'} alignItems={'center'}>
-
-                <Typography variant="caption">{storage.platform}</Typography>
-                <ExpandMoreIcon  />
-                </Box>
-                {expanded?.id === storage.id && (
-                    ['Drive', 'Dropbox', 'OneDrive'].includes(expanded?.platform)?
-                    <Box>
-                    <Typography>Connected</Typography>
-                    {editing && 
-                    <Button 
-                    variant="contained" 
-                    color="error"
-                    onClick={()=>ApiToBeRemove(storage.id)}
-                    >   
-                        Delete
-                    </Button>
-                    }
-                    </Box>
-                    :
-                    <Box mt={2}>
-                    {/* {Object.entries(storage.details).map(([key, value]) => (
-                        <TextField
-                        key={key}
-                        label={key}
-                        value={key !== "alias" ? "*****" : value}
-                        variant="outlined"
-                        fullWidth
-                        margin="normal"
-                        disabled
-                        />
-                    ))} */}
-                    <Typography>Connected</Typography>
-                    
-                    {editing && 
-                    <Button 
-                    variant="contained" 
-                    color="error"
-                    onClick={()=>ToBeRemove(storage.id)}
-                    >   
-                        Delete
-                    </Button>
-                    }
-                    </Box>
-                    
                 )}
-                </CardContent>
-            </Card>
             </Box>
-        )):null}
-        </Box>
 
-
-
-        <Divider sx={{ my: 4 }} />
-
-        {/* Add New Storage */}
-        <Typography variant="h4">Add New Storage</Typography>
-        {!selectedPlatform ? (
-            <Box display={'flex'} flexWrap={'wrap'} justifyContent={{xs:"center", md:"flex-start"}} gap={5}>
-            {Object.entries(platforms).map(([key, platform]) => (
-                <Box>
-                <Card
-                        onClick={platform.available ? () => handleSelectPlatform(key) : undefined}
-                    sx={{
-                    background: platform.bkc,
-                    border: "1px solid #ccc",
-                    cursor: platform.available?"pointer": "not-allowed",
-                    textAlign: "center",
-                    width:"250px",
-                    height:"140px",
-                    p: 2,
-                    }}
-                >
-                    <CardContent>
-                    <Typography fontWeight={"bold"} color={platform.color}>
-                        {platform.name}
-                    </Typography>
-                    <Typography
-                        variant="caption"
-                        color={platform.color}
-                    >
-                        {platform.caption}
-                    </Typography>
-                   {!platform.available && <Typography fontWeight={"bold"} color={platform.color}>
-                        Coming Soon...
-                    </Typography>}
-                    </CardContent>
-                </Card>
-                </Box>
-            ))}
-            </Box>
-        ) : (
-            <Box mt={3}>
-            <Typography variant="h6">{platforms[selectedPlatform].name}</Typography>
-            {platforms[selectedPlatform].inputs.oauth ? (
-                <Box mt={2}>
-                <Button
-                    variant="contained"
-                    color="primary"
-                    // onClick={() => handleOAuthConnect(platforms[selectedPlatform].name)}
-                    onClick={() => oAuthChoice(platforms[selectedPlatform].name)}
-                >
-                    Connect with {platforms[selectedPlatform].name}
-                </Button>
-                <Button
-                    variant="outlined"
-                    color="secondary"
-                    onClick={() => setSelectedPlatform(null)}
-                    sx={{ ml: 2 }}
-                >
-                    Cancel
-                </Button>
-                </Box>
-            ) : (
-                <>
-                <TextField
-                    label="Alias"
-                    value={formData.alias || ""}
-                    onChange={(e) => handleInputChange("alias", e.target.value)}
-                    variant="outlined"
-                    fullWidth
-                    margin="normal"
-                />
-
-                {/* Toggle for AWS/S3 Compatible: Keys vs Signed URL */}
-                {["aws", "s3Compatible"].includes(selectedPlatform) && (
-                    <FormControlLabel
-                    control={
-                        <Switch
-                        checked={useSignedUrl}
-                        onChange={(e) => setUseSignedUrl(e.target.checked)}
-                        />
-                    }
-                    label="Use Signed URL"
-                    />
-                )}
-
-                {/* Dynamic Inputs */}
-                {platforms[selectedPlatform].inputs[useSignedUrl ? "signedUrl" : "keys"].map((input) => (
-                    <TextField
-                    key={input}
-                    label={input}
-                    value={formData[input] || ""}
-                    onChange={(e) => handleInputChange(input, e.target.value)}
-                    variant="outlined"
-                    fullWidth
-                    margin="normal"
-                    />
+            {/* Storage Cards */}
+            <Box display={"flex"} gap={3} flexWrap={"wrap"}>
+                {filteredList?.map((storage) => (
+                    <Box key={storage.id} mt={2}>
+                        <Card sx={{
+                            background: "none",
+                            boxShadow: "0 1px 5px #ccc",
+                            width: "calc(min(300px, 90dvw))",
+                            maxWidth: "400px"
+                        }}>
+                            <CardContent
+                                onClick={() => handleOpenStorageCard(storage)}
+                                sx={{
+                                    cursor: "pointer",
+                                    textAlign: "center"
+                                }}
+                            >
+                                <Typography variant="h4">{storage.name}</Typography>
+                                <Box display={'flex'} justifyContent={'center'} alignItems={'center'}>
+                                    <Typography variant="caption">{storage.storageType}</Typography>
+                                    <ExpandMoreIcon />
+                                </Box>
+                                {expanded?.id === storage.id && (
+                                    <Box mt={2}>
+                                        <Typography>
+                                            {storage.isDefault ? 'Default Storage' : 'Connected'}
+                                        </Typography>
+                                        
+                                        <Box display="flex" gap={1} mt={2} justifyContent="center">
+                                            <Button
+                                                variant="outlined"
+                                                size="small"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    testStorageConnection(storage.id);
+                                                }}
+                                            >
+                                                Test Connection
+                                            </Button>
+                                            
+                                            {editing && (
+                                                <Button
+                                                    variant="contained"
+                                                    color="error"
+                                                    size="small"
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        toBeRemove(storage.id);
+                                                    }}
+                                                >
+                                                    Delete
+                                                </Button>
+                                            )}
+                                        </Box>
+                                    </Box>
+                                )}
+                            </CardContent>
+                        </Card>
+                    </Box>
                 ))}
-
-                <Box mt={2}>
-                    <Button
-                    variant="contained"
-                    color="primary"
-                    onClick={handleSaveStorage}
-                    disabled={!formData.alias} // Ensure alias is set before saving
-                    >
-                    Save Storage
-                    </Button>
-                    <Button
-                    variant="outlined"
-                    color="secondary"
-                    onClick={() => setSelectedPlatform(null)}
-                    sx={{ ml: 2 }}
-                    >
-                    Cancel
-                    </Button>
-                </Box>
-                </>
-            )}
             </Box>
-        )}
+
+            {/* Add New Storage Section */}
+            <Typography variant="h4" mt={4}>
+                Add New Storage
+            </Typography>
+
+            <Box display={"flex"} gap={3} flexWrap={"wrap"}>
+                {Object.entries(platforms).map(([key, platform]) => (
+                    platform.available && (
+                        <Box key={key} mt={2}>
+                            <Card
+                                sx={{
+                                    background: platform.bkc,
+                                    color: platform.color,
+                                    cursor: "pointer",
+                                    width: "200px",
+                                    height: "150px",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    "&:hover": {
+                                        transform: "scale(1.05)",
+                                        transition: "transform 0.2s"
+                                    }
+                                }}
+                                onClick={() => {
+                                    if (platform.inputs.oauth) {
+                                        oAuthChoice(platform.name);
+                                    } else {
+                                        handleSelectPlatform(key);
+                                    }
+                                }}
+                            >
+                                <CardContent sx={{ textAlign: "center" }}>
+                                    <Typography variant="h5">{platform.name}</Typography>
+                                    <Typography variant="caption">{platform.caption}</Typography>
+                                </CardContent>
+                            </Card>
+                        </Box>
+                    )
+                ))}
+            </Box>
+
+            {/* Configuration Form for Selected Platform */}
+            {selectedPlatform && platforms[selectedPlatform] && !platforms[selectedPlatform].inputs.oauth && (
+                <Box mt={4} p={3} sx={{ border: "1px solid #ccc", borderRadius: 2 }}>
+                    <Typography variant="h5" mb={2}>
+                        Configure {platforms[selectedPlatform].name}
+                    </Typography>
+
+                    <Box display="flex" flexDirection="column" gap={2}>
+                        <TextField
+                            label="Storage Name"
+                            value={formData.alias || ""}
+                            onChange={(e) => handleInputChange("alias", e.target.value)}
+                            fullWidth
+                        />
+
+                        {platforms[selectedPlatform].inputs.keys?.map((key) => (
+                            <TextField
+                                key={key}
+                                label={key}
+                                value={formData[key] || ""}
+                                onChange={(e) => handleInputChange(key, e.target.value)}
+                                type={key.toLowerCase().includes("secret") ? "password" : "text"}
+                                fullWidth
+                                required
+                            />
+                        ))}
+
+                        {platforms[selectedPlatform].inputs.signedUrl && (
+                            <FormControlLabel
+                                control={
+                                    <Switch
+                                        checked={useSignedUrl}
+                                        onChange={(e) => setUseSignedUrl(e.target.checked)}
+                                    />
+                                }
+                                label="Use Signed URLs"
+                            />
+                        )}
+
+                        <Box display="flex" gap={2} mt={2}>
+                            <Button
+                                variant="contained"
+                                color="primary"
+                                onClick={handleSaveStorage}
+                                disabled={loading}
+                            >
+                                Save Storage
+                            </Button>
+                            <Button
+                                variant="outlined"
+                                onClick={() => setSelectedPlatform(null)}
+                            >
+                                Cancel
+                            </Button>
+                        </Box>
+                    </Box>
+                </Box>
+            )}
         </Box>
     );
 };
